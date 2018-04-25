@@ -1,0 +1,931 @@
+library(plyr)
+library(gridExtra)
+library(tidyverse)
+library(dplyr)
+library(tidyverse)
+library(fmsb)
+library(scales)
+library(parallel)
+library(MuMIn)
+library(moments)
+library(DataCombine)
+library(rcompanion)
+library(pbapply)
+library(MASS)
+library(parallel)
+library(MuMIn)
+library(permute)
+library(rcompanion)
+library(tidyr)
+library(moments)
+#install.packages('ggplot2',repos = c("http://rstudio.org/_packages",
+#                           "http://cran.rstudio.com"))
+#source('http://bioconductor.org/biocLite.R')
+#biocLite('Rgraphviz')
+
+datadirout<-'N://cluster_2017//scratch//spera//data//dataoutput'
+datadir1<-'N://cluster_2017//scratch//spera//data//stagingdat'
+datadir<-"N:/cluster_2017/scratch/spera/data/finaldat_v2"
+figsdir<-"C://Users//sailfish//Documents//aalldocuments//literature//research//active//SPERA//Figures"
+figsdir<-"C://Users//copepod//Documents//aalldocuments//literature//research//active//SPERA//Figures"
+
+
+
+############################################
+
+###READ IN RAW DATA TO DETERMINE MISSINGNESS
+setwd(datadir)
+load('SPERA_andata_new.RData')
+nms<-names(data)
+nms<-nms[grepl('\\.se',nms)==FALSE]
+nms<-nms[grepl('\\.her',nms)==FALSE]
+nms<-nms[grepl('\\.tplus',nms)==FALSE]
+nms<-nms[grepl('\\.tmin',nms)==FALSE]
+nms<-nms[grepl('sp\\.n',nms)==FALSE]
+df<-data[,names(data) %in% c('year',nms)]
+df<-data[,!(names(data) %in% c('her.ssb'))]
+#df<-df[,!(names(df) %in% c('wind.fsd','had.totwgt.rv','had.totno.rv'))]
+
+#CREATE LAGGED VERSIONS OF VARIABLES, AS IN IMPUTED
+rspnms<-c('her.ssbc','her.szpe.rv','herjuv.fmass.rv','her.len.rv','her.fmass.rv','her.waa','herlrv.len','herjuv.metai.rv','her.cf.rv','her.rec1','her.ajrat.rv','her.prod','her.metai.rv','herlrv.mn.bof')
+#rspnms<-c('her.ssbc','her.len.rv','herlrv.len','her.rec1','her.prod','her.state')
+for(i in 1:length(rspnms)){
+nm<-rspnms[i]
+df<-slide(df,Var=nm,slideBy=1,NewVar=gsub(' ','',paste(nm,'.t1')))
+df<-slide(df,Var=nm,slideBy=2,NewVar=gsub(' ','',paste(nm,'.t2')))
+df<-slide(df,Var=nm,slideBy=3,NewVar=gsub(' ','',paste(nm,'.t3')))
+}
+
+clmnms<-c("asl","gs.dist","nao", "nut.state","ss.ct","ss.dist","sst.fsd","sst.tmax","strt","strt.ct","t50.ct","temp.state","wind.amp",  "wind.state","wind.tmax", "wnd.ct","wnd.strs323fall",'nut.ct','nut.state')
+for(i in 1:length(clmnms)){
+nm<-clmnms[i]
+df<-slide(df,Var=nm,slideBy=-1,NewVar=gsub(' ','',paste(nm,'.t-1')))
+df<-slide(df,Var=nm,slideBy=-2,NewVar=gsub(' ','',paste(nm,'.t-2')))
+}
+
+rspnms<-c("her.expr","her.land","her.land.pct1","her.land.spdiv","her.land.sprich",'bfish.state')
+for(i in 1:length(rspnms)){
+nm<-rspnms[i]
+df<-slide(df,Var=nm,slideBy=-1,NewVar=gsub(' ','',paste(nm,'.t-1')))
+df<-slide(df,Var=nm,slideBy=-2,NewVar=gsub(' ','',paste(nm,'.t-2')))
+}
+
+names(df)<-gsub('t-1','t\\.1',names(df))
+names(df)<-gsub('t-2','t\\.2',names(df))
+names(df)<-gsub('t-3','t\\.3',names(df))
+dfs<-df %>% gather(var,y,-year)
+dfs$y<-ifelse(dfs$y==Inf,NA,dfs$y)
+dfs$y<-ifelse(is.na(dfs$y)==FALSE,1,NA)
+
+
+#GET PROPORTION OF EACH COLUMN THAT IS MISSING
+#dat<-subset(df,year>=1971 & year<=2005)
+dat<-subset(df,year>=1975 & year<=2005)
+pMiss <- function(x){sum(is.na(x))/length(x)*100}
+dm<-data.frame(var=names(dat),
+               pmis=apply(dat,2,pMiss))
+dm<-dm[order(dm$pmis),]
+#apply(dat,1,pMiss)
+dm2<-subset(dm,pmis<=35)
+
+
+
+#####################################################
+#####################################################
+###############################################################
+#1 LOAD IMPUTED DATA AND SUBSET BASED ON MISSINGNESS
+omt<-c('had.dep.rv','wind.fsd','had.totwgt.rv','had.totno.rv','had.len.rv','her.dvm2.rv','herlrv.dep.bof')
+setwd(datadir)
+#load("impdatav.std.RData")
+load("impdatav.RData")
+#load('SPERA_andata_new.RData')
+data<-impdatav
+#names(data)<-gsub('t\\.1','t-1',names(data))
+#names(data)<-gsub('t\\.2','t-2',names(data))
+#names(data)<-gsub('t\\.3','t-3',names(data))
+nms<-names(data)
+nms<-nms[grepl('\\.se',nms)==FALSE]
+nms<-nms[grepl('\\.her',nms)==FALSE]
+nms<-nms[grepl('\\.tplus',nms)==FALSE]
+nms<-nms[grepl('\\.tmin',nms)==FALSE]
+nms<-nms[grepl('sp\\.n',nms)==FALSE]
+df<-data[,names(data) %in% c('year',nms)]
+df<-df[,!(names(df) %in% c(omt))]
+
+#RETAINS INSTANCES WHERE MISSINGNESS<30%
+df<-df[,names(df) %in% as.character(dm2$var)]
+
+df<-df[,!(names(df)%in%c("her.spcv","her.spnug","her.sprng","her.spvar","her.tbio","her.totno.rv","her.totwgt.rv","herjuv.dumx.rv","herjuv.dvm.rv","herjuv.len.rv","herjuv.totno.rv","herjuv.totwgt.rv",'her.eggprod','her.tbio','herjuv.len.rv','her.georng','herjuv.dumx.rv',"her.cf.cat","her.dep.rv","her.dvm.rv","her.dvm2.rv","her.eggprod","her.georng","her.spcv","her.spnug","her.sprng","her.spvar","her.tbio","her.totno.rv","her.totwgt.rv","herjuv.dumx.rv","herjuv.dvm.rv","herjuv.len.rv","herjuv.totno.rv","herjuv.totwgt.rv","herlrv.dep.bof","her.ajrat.rv", "her.ajrat.rv.t1", "her.ajrat.rv.t2", "her.ajrat.rv.t3","her.cf.rv", "her.cf.rv.t1","her.cf.rv.t2", "her.cf.rv.t3","her.fmass.rv","her.fmass.rv.t1","her.fmass.rv.t2", "her.fmass.rv.t3","her.metai.rv","her.metai.rv.t1","her.metai.rv.t2", "her.metai.rv.t3","her.prod","her.prod.t1", "her.prod.t2","her.prod.t3","her.szpe.rv", "her.szpe.rv.t1", "her.szpe.rv.t2","her.szpe.rv.t3","her.waa","her.waa.t1","her.waa.t2","her.waa.t3", "herjuv.fmass.rv", "herjuv.fmass.rv.t1","herjuv.fmass.rv.t2","herjuv.fmass.rv.t3","herjuv.prey.bof","her.age.cat","her.age5.cat","her.agediv.cat", "her.agepe.cat.x","her.agepe.cat.y","herjuv.metai.rv"))]
+
+nms<-names(df)
+rspnms<-nms[grepl('land',nms)==TRUE |
+         grepl('bfish',nms)==TRUE |
+         grepl('expr',nms)==TRUE]
+rspnms<-rspnms[grepl('\\.se',rspnms)==FALSE]
+for(i in 1:length(rspnms)){
+nm<-rspnms[i]
+df<-slide(df,Var=nm,slideBy=-1,NewVar=gsub(' ','',paste(nm,'.t.1')))
+}
+
+df<-df[,!(names(df) %in% c('sst.t12','sst.fmax','sst.fmin','sst.bbay','sst.grg','sst.hal','wind.fmin','wind.min','wind.max','her.land.spdiv','her.land.spdiv.t.1','her.land.spdiv.t.2','lrv.mn.bof','zp.rich.sabs','zp.div.sabs.state','ph.rich.sabs','lrv.rich.bof','phos','sil','sst.min','temp.state','wind.state','sst.amp','her.expr','her.land.pct1','her.land','her.land.sprich','bfish.state','year.1'))]
+
+plot(df$year,df$herlrv.mn.bof,pch=15)
+
+#NORMALIZE SO THAT EFFECTS ARE APPROX LINEAR
+f<-function(x){transformTukey(x,plotit=FALSE)}
+#df<-data.frame(cbind(subset(df,select='year'),apply(df[,!(names(df) %in% c('year'))],2,f)))
+
+#Z-STANDARDIZE
+f<-function(x){scale(x,center=TRUE,scale=TRUE)}
+#df<-data.frame(cbind(subset(df,select='year'),apply(df[,!(names(df) %in% c('year'))],2,f)))
+
+###########################################################
+
+###########################################################
+#clusterType<-if(length(find.package('snow',quiet=TRUE))) 'SOCK' else 'PSOCK'
+#clust<-try(makeCluster(getOption('cl.cores',8),type=clusterType))
+#clusterExport(clust,'df2')
+nrep<-4000
+df2<-df
+df2<-subset(df2,year>=1975 & year<=2005)
+sts<-c('her.rec1','her.state','herlrv.mn.bof','herlrv.len','herlrv.surv','year','her.len.rv')
+df2<-df2[,!(names(df2) %in% sts)]
+
+
+mavgfun<-function(){
+#GETS SAMPLE OF VARIABLES TO EXAMINE
+nms<-names(df2[,!(names(df2) %in% c('year','her.ssbc'))])
+nms<-sample(nms,10,replace=FALSE)
+d<-subset(df2,select=c('her.ssbc',nms))
+options(na.action='na.fail')
+mod<-lm(her.ssbc~.,data=d)#ONE-WAY INTERRACTIONS
+#mod<-lm(her.ssbc~.^n,data=d)#ALL INTERACTIONS
+#mod<-lm(her.ssbc~.*.,data=d)#2-WAY INTERRACTIONS
+modl<-dredge(mod,extra=c('R^2','adjR^2'),rank='AICc',trace=FALSE)
+ma<-model.avg(modl)
+imp<-data.frame(ma$importance)
+imp$var<-rownames(imp)
+ttab<-data.frame(coefficients(ma))
+ttab$var<-rownames(ttab)
+ttab<-ttab[-1,]
+out<-merge(ttab,imp,by=c('var'),all=TRUE)
+out$resp<-'her.ssbc'
+return(out)
+}
+system.time(dout0<-pbreplicate(nrep,mavgfun(),simplify=FALSE))
+dssb<-data.frame(do.call('rbind',dout0))
+
+
+
+
+
+df2<-df
+df2<-subset(df2,year>=1975 & year<=2005)
+sts<-c('her.rec1','her.ssbc','herlrv.mn.bof','herlrv.len','herlrv.surv','year','her.len.rv')
+df2<-df2[,!(names(df2) %in% sts)]
+
+mavgfun<-function(){
+#GETS SAMPLE OF VARIABLES TO EXAMINE
+nms<-names(df2[,!(names(df2) %in% c('year','her.state'))])
+nms<-sample(nms,10,replace=FALSE)
+d<-subset(df2,select=c('her.state',nms))
+options(na.action='na.fail')
+mod<-lm(her.state~.,data=d)
+modl<-dredge(mod,extra=c('R^2','adjR^2'),rank='AICc',trace=FALSE)
+ma<-model.avg(modl)
+imp<-data.frame(ma$importance)
+imp$var<-rownames(imp)
+ttab<-data.frame(coefficients(ma))
+ttab$var<-rownames(ttab)
+ttab<-ttab[-1,]
+out<-merge(ttab,imp,by=c('var'),all=TRUE)
+out$resp<-'her.state'
+return(out)
+}
+
+system.time(dout0<-pbreplicate(nrep,mavgfun(),simplify=FALSE))
+dstate<-data.frame(do.call('rbind',dout0))
+
+
+
+
+df2<-df
+df2<-subset(df2,year>=1975 & year<=2005)
+sts<-c('her.state','her.ssbc','herlrv.mn.bof','herlrv.len','herlrv.surv','year','her.len.rv')
+df2<-df2[,!(names(df2) %in% sts)]
+
+
+mavgfun<-function(){
+#GETS SAMPLE OF VARIABLES TO EXAMINE
+nms<-names(df2[,!(names(df2) %in% c('year','her.rec1'))])
+nms<-sample(nms,10,replace=FALSE)
+d<-subset(df2,select=c('her.rec1',nms))
+options(na.action='na.fail')
+mod<-lm(her.rec1~.,data=d)
+modl<-dredge(mod,extra=c('R^2','adjR^2'),rank='AICc',trace=FALSE)
+ma<-model.avg(modl)
+imp<-data.frame(ma$importance)
+imp$var<-rownames(imp)
+ttab<-data.frame(coefficients(ma))
+ttab$var<-rownames(ttab)
+ttab<-ttab[-1,]
+out<-merge(ttab,imp,by=c('var'),all=TRUE)
+out$resp<-'her.rec1'
+return(out)
+}
+system.time(dout0<-pbreplicate(nrep,mavgfun(),simplify=FALSE))
+drec<-data.frame(do.call('rbind',dout0))
+
+
+
+
+df2<-df
+df2<-subset(df2,year>=1975 & year<=2005)
+sts<-c('her.state','her.ssbc','her.rec1','herlrv.len','herlrv.surv','year','her.len.rv')
+df2<-df2[,!(names(df2) %in% sts)]
+
+mavgfun<-function(){
+#GETS SAMPLE OF VARIABLES TO EXAMINE
+nms<-names(df2[,!(names(df2) %in% c('year','herlrv.mn.bof'))])
+nms<-sample(nms,10,replace=FALSE)
+d<-subset(df2,select=c('herlrv.mn.bof',nms))
+options(na.action='na.fail')
+mod<-lm(herlrv.mn.bof~.,data=d)
+modl<-dredge(mod,extra=c('R^2','adjR^2'),rank='AICc',trace=FALSE)
+ma<-model.avg(modl)
+imp<-data.frame(ma$importance)
+imp$var<-rownames(imp)
+ttab<-data.frame(coefficients(ma))
+ttab$var<-rownames(ttab)
+ttab<-ttab[-1,]
+out<-merge(ttab,imp,by=c('var'),all=TRUE)
+out$resp<-'herlrv.mn.bof'
+return(out)
+}
+system.time(dout0<-pbreplicate(nrep,mavgfun(),simplify=FALSE))
+dlrv<-data.frame(do.call('rbind',dout0))
+
+
+
+
+
+df2<-df
+df2<-subset(df2,year>=1975 & year<=2005)
+sts<-c('her.state','her.ssbc','her.rec1','herlrv.mn.bof','herlrv.surv','year','her.len.rv')
+df2<-df2[,!(names(df2) %in% sts)]
+
+mavgfun<-function(){
+#GETS SAMPLE OF VARIABLES TO EXAMINE
+nms<-names(df2[,!(names(df2) %in% c('year','herlrv.len'))])
+nms<-sample(nms,10,replace=FALSE)
+d<-subset(df2,select=c('herlrv.len',nms))
+options(na.action='na.fail')
+mod<-lm(herlrv.len~.,data=d)
+modl<-dredge(mod,extra=c('R^2','adjR^2'),rank='AICc',trace=FALSE)
+ma<-model.avg(modl)
+imp<-data.frame(ma$importance)
+imp$var<-rownames(imp)
+ttab<-data.frame(coefficients(ma))
+ttab$var<-rownames(ttab)
+ttab<-ttab[-1,]
+out<-merge(ttab,imp,by=c('var'),all=TRUE)
+out$resp<-'herlrv.len'
+return(out)
+}
+system.time(dout0<-pbreplicate(nrep,mavgfun(),simplify=FALSE))
+dlrvlen<-data.frame(do.call('rbind',dout0))
+
+
+aa<-subset(mmdat,resp=='herlrv.len' & var=='sst.fsd')
+aa<-subset(mmdat,resp=='herlrv.len' & var=='sst.max')
+aa<-subset(mmdat,resp=='herlrv.len' & var=='sst.amp')
+aa<-subset(mmdat,resp=='herlrv.len' & var=='sst.lur')
+mean(aa$coefficients.ma.)
+aa<-subset(mmdat,resp=='herlrv.mn.bof' & var=='sst.max')
+aa<-subset(mmdat,resp=='herlrv.mn.bof' & var=='sst.amp')
+aa<-subset(mmdat,resp=='herlrv.mn.bof' & var=='sst.lur')
+mean(aa$coefficients.ma.)
+
+aa<-subset(mmdat,resp=='her.ssbc' & var=='sst.max')
+mean(aa$coefficients.ma.)
+aa<-subset(mmdat,resp=='her.ssbc' & var=='sst.max')
+mean(aa$coefficients.ma.)
+
+
+mmdat<-rbind.fill(dssb,drec,dlrv,dlrvlen,dstate)
+setwd(datadir)
+#save(mmdat,file='mmdat.RData')
+load('mmdat.RData')
+
+load('mmdat2.RData')
+mmdat2<-subset(mmdat2,select=c('resp','var1','var2','coefficients.ma.','ma.importance'))
+mmdat2<-mmdat2 %>% gather(key = "var2", value="var",-c('resp','coefficients.ma.','ma.importance'))
+mmdat2<-subset(mmdat2,select=c('var','coefficients.ma.','ma.importance','resp'))
+
+
+
+2^78
+setwd(figsdir)
+dm<-subset(read.csv('dm.csv',header=TRUE),select=c('var','lbl'))
+
+nfun<-function(d){
+print(dim(d)[1])
+d<-merge(d,dm,by=c('var'),all.x=TRUE,all.y=FALSE)
+print(dim(d)[1])
+d$c1<-ifelse(d$var %in% c('bfish.state.t.1','bfish.state.t.2','bfish.state'),'Balanced F',NA)
+d$c1<-ifelse(d$var %in% c('her.expr','her.expr.t.1','her.expr.t.2'),'F',d$c1)
+d$c1<-ifelse(d$var %in% c('her.land.pct1','her.land.pct1.t.1','her.land.pct1.t.2','her.land.spdiv','her.land.spdiv.pct1','her.land.spdiv.t.1','her.land.spdiv.t.2','her.land.sprich.pct1','her.land.sprich.t.1','her.land.sprich.t.2','her.land.sprich'),'Spatial L',d$c1)
+d$c1<-ifelse(d$var %in% c('her.land','her.land.t.1','her.land.t.2'),'Landings',d$c1)
+d$c1<-ifelse(d$var %in% c('had.pi'),'Predation',d$c1)
+d$c1<-ifelse(d$var %in% c('her.jf.bof'),'Competition',d$c1)
+d$c1<-ifelse(d$var %in% c('sst.bbay','sst.had','sst.grg','sst.lur','sst.max','sst.min','sst.mn','sst.prin','sst.fmin','sst.stalt','sst.hal','temp.state'),'SST',d$c1)
+d$c1<-ifelse(d$var %in% c('t50'),'T50',d$c1)
+d$c1<-ifelse(d$var %in% c('wind.fmax','wind.fmin','wind.max','wind.min','wnd.mn','wnd.pctg10fall','wnd.strs323fall','wind.state'),'Wind',d$c1)
+d$c1<-ifelse(d$var %in% c('sil','phos','nut.state'),'Nutrients',d$c1)
+d$c1<-ifelse(d$var %in% c('strt'),'Stratification',d$c1)
+d$c1<-ifelse(d$var %in% c('ph.mn.sabs','ph.mn.state','phyt.mn.insitu'),'Phytoplankton',d$c1)
+d$c1<-ifelse(d$var %in% c('ph.div.sabs','ph.div.state','ph.rich.sabs'),'Phyt diversity',d$c1)
+d$c1<-ifelse(d$var %in% c('ph.pe.sabs','ph.pe.state'),'Phyt evenness',d$c1)
+d$c1<-ifelse(d$var %in% c('lrv.pe.bof','zp.pe.sabs'),'Zoop evenness',d$c1)
+d$c1<-ifelse(d$var %in% c('zp.rich.sabs','zp.div.sabs','zp.div.sabs.state','lrv.rich.bof'),'Zoop diversity',d$c1)
+d$c1<-ifelse(d$var %in% c('her.preytot.bof','lrv.mn.bof','zp.mn.sabs'),'Zoop',d$c1)
+d$c1<-ifelse(d$var %in% c('chl.ct'),'Phyt T',d$c1)
+d$c1<-ifelse(d$var %in% c('ss.ct'),'SS T',d$c1)
+d$c1<-ifelse(d$var %in% c('gs.ct'),'GS T',d$c1)
+d$c1<-ifelse(d$var %in% c('strt.ct'),'Stratification T',d$c1)
+d$c1<-ifelse(d$var %in% c('t50.ct'),'T50 T',d$c1)
+d$c1<-ifelse(d$var %in% c('wnd.ct'),'Wind T',d$c1)
+d$c1<-ifelse(d$var %in% c('sst.tmax'),'SST T',d$c1)
+d$c1<-ifelse(d$var %in% c('sst.fsd'),'SST variance',d$c1)
+d$c1<-ifelse(d$var %in% c('sst.sha'),'SST SHA',d$c1)
+d$c1<-ifelse(d$var %in% c('sst.amp'),'SST amplitude',d$c1)
+d$c1<-ifelse(d$var %in% c('sst.dur12'),'SST duration',d$c1)
+d$c1<-ifelse(d$var %in% c('wind.tmax'),'Wind T',d$c1)
+d$c1<-ifelse(d$var %in% c('gs.dist'),'GS distance',d$c1)
+d$c1<-ifelse(d$var %in% c('ss.dist'),'SS distance',d$c1)
+d$c1<-ifelse(d$var %in% c('wind.amp'),'Wind amplitude',d$c1)
+d$c1<-ifelse(d$var %in% c('nao'),'NAO',d$c1)
+d$c1<-ifelse(d$var %in% c('amo'),'AMO',d$c1)
+d$c1<-ifelse(d$var %in% c('ao'),'AO',d$c1)
+d$c1<-ifelse(d$var %in% c('asl'),'Current outflow',d$c1)
+
+
+d$c2<-ifelse(d$c1 %in% c('Balanced F','F','Landings','Spatial L'),'Exploitation',NA)
+d$c2<-ifelse(d$c1 %in% c('Current outflow','GS distance','SS distance','Wind'),'Transport',d$c2)
+d$c2<-ifelse(d$c1 %in% c('Competition'),'Competition',d$c2)
+d$c2<-ifelse(d$c1 %in% c('Predation'),'Predation',d$c2)
+d$c2<-ifelse(d$c1 %in% c('Nutrients','Stratification','Phytoplankton'),'Production',d$c2)
+d$c2<-ifelse(d$c1 %in% c('Phyt T','Stratification T','Wind T','SST T','T50 T','Wind amplitude','SST amplitude','SST variance','SS T','GS T','SST duration','SST SHA'),'Phenology',d$c2)
+d$c2<-ifelse(d$c1 %in% c('Zoop diversity','Zoop evenness'),'Zoop community',d$c2)
+d$c2<-ifelse(d$c1 %in% c('Phyt diversity','Phyt evenness'),'Phytoplankton',d$c2)
+d$c2<-ifelse(d$c1 %in% c('SST','T50'),'Temperature',d$c2)
+d$c2<-ifelse(d$c1 %in% c('NAO','AMO','AO'),'Climate',d$c2)
+d$c2<-ifelse(d$c1 %in% c('Zoop'),'Zooplankton',d$c2)
+return(d)
+}
+mmdat<-nfun(mmdat)
+mmdat2<-nfun(mmdat2)
+
+
+
+ff<-function(d){
+    return(data.frame(c2=unique(d$c2),
+                      y=mean(d$ma.importance,na.rm=TRUE),
+                      b=mean(d$coefficients.ma.,na.rm=TRUE)))
+}
+d1<-ddply(mmdat,.(resp,lbl),.fun=ff)
+names(d1)[4:5]<-c('value1','b1')
+d2<-ddply(mmdat2,.(resp,lbl),.fun=ff)
+names(d2)[4:5]<-c('value2','b2')
+dat1<-merge(d1,d2,by=c('resp','lbl','c2'),all=FALSE)
+names(dat1)[1:3]<-c('resp','individual','group')
+dat1$value1<-dat1$value1*100
+dat1$value2<-dat1$value2*100
+dat1<-subset(dat1,select=c('resp','individual','group','value1','value2'))
+
+dat1 = dat1 %>% gather(key = "observation", value="value", -c(1,2,3))
+#dat1$value<-dat1$value/2
+dt<-subset(dat1,resp=='her.ssbc')
+library(viridis)
+
+
+
+pfun2<-function(dt){
+
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar<-2
+nObsType<-nlevels(as.factor(dt$observation))
+to_add<- data.frame( matrix(NA, empty_bar*nlevels(dt$group)*nObsType, ncol(dt)) )
+colnames(to_add)<-colnames(dt)
+to_add$group<-rep(levels(dt$group), each=empty_bar*nObsType )
+dt<-rbind(dt, to_add)
+dt<-dt %>% arrange(group, individual)
+dt$id<-rep(seq(1, nrow(dt)/nObsType) , each=nObsType)
+
+# Get the name and the y position of each label
+label_dt= dt %>% group_by(id, individual) %>% summarize(tot=sum(value))
+number_of_bar=nrow(label_dt)
+angle= 90 - 360 * (label_dt$id-0.5) /number_of_bar     # I substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_dt$hjust<-ifelse( angle < -90, 1, 0)
+label_dt$angle<-ifelse(angle < -90, angle+180, angle)
+
+# prepare a dt frame for base lines
+base_dt=dt %>%
+  group_by(group) %>%
+  summarize(start=min(id), end=max(id) - empty_bar) %>%
+  rowwise() %>%
+  mutate(title=mean(c(start, end)))
+
+# prepare a dt frame for grid (scales)
+grid_dt = base_dt
+grid_dt$end = grid_dt$end[ c( nrow(grid_dt), 1:nrow(grid_dt)-1)] + 1
+grid_dt$start = grid_dt$start - 1
+grid_dt=grid_dt[-1,]
+
+
+# Make the plot
+return(ggplot(dt) +
+  # Add the stacked bar
+  geom_bar(aes(x=as.factor(id), y=value, fill=observation), stat="identity", alpha=1) +
+scale_fill_manual(values=c('dodgerblue3','gold'))+
+    #scale_fill_viridis(discrete=TRUE) +
+
+  # Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+  geom_segment(data=grid_dt, aes(x = end, y = 0, xend = start, yend = 0), colour="black", alpha=.3, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_dt, aes(x = end, y = 50, xend = start, yend = 50), colour="black", alpha=.3, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_dt, aes(x = end, y = 100, xend = start, yend = 100),colour="black", alpha=.3, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_dt, aes(x = end, y = 150, xend = start, yend =150),colour = "black", alpha=.3, size=0.3 , inherit.aes = FALSE ) +
+  geom_segment(data=grid_dt, aes(x = end, y = 200, xend = start, yend = 200),colour="black", alpha=.3, size=0.3 , inherit.aes = FALSE ) +
+expand_limits(y=c(0,200))+
+
+  # Add text showing the value of each 100/75/50/25 lines
+  annotate("text", x = rep(max(dt$id),5), y = c(0, 50, 100, 150, 200), label = c("0", "50", "100", "150", "200") , color="grey", size=6 , angle=0, fontface="bold", hjust=1) +
+
+#  ylim(-150,max(label_dt$tot, na.rm=T)) +
+  ylim(-150,175) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm")
+  ) +
+  coord_polar() +
+
+  # Add labels on top of each bar
+  geom_text(data=label_dt, aes(x=id, y=tot+10, label=individual, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_dt$angle, inherit.aes = FALSE ) +
+
+  # Add base line information
+  geom_segment(data=base_dt, aes(x = start, y = -5, xend = end, yend = -5),colour="black", alpha=0.8, size=0.6 , inherit.aes = FALSE )+
+theme(plot.margin = unit(c(1,1,1,1), "cm")))
+}
+
+
+p1<-pfun2(subset(dat1, resp=='her.ssbc'))
+
+p1<-pfun2(subset(dat1,is.na(group)==FALSE & resp=='her.ssbc'))
+p2<-pfun2(subset(dat1,is.na(group)==FALSE & resp=='her.state'))
+p3<-pfun2(subset(dat1,is.na(group)==FALSE & resp=='her.rec1'))
+p4<-pfun2(subset(dat1,is.na(group)==FALSE & resp=='herlrv.mn.bof'))
+p5<-pfun2(subset(dat1,is.na(group)==FALSE & resp=='herlrv.len'))
+
+setwd(figsdir)
+pdf('circularbarplot_importance_stack.pdf',height=10,width=10)
+par(mar=c(4,4,4,4))
+p1
+p2
+p3
+p4
+p5
+dev.off()
+
+
+
+
+##########################################################
+
+# MAKES CIRCULAR BARPLOT OF MM IMPORTANCE BY GROUPS
+
+##########################################################
+ff<-function(d){
+    return(data.frame(c2=unique(d$c2),
+                      y=mean(d$ma.importance,na.rm=TRUE),
+                      b=mean(d$coefficients.ma.,na.rm=TRUE)))
+}
+dat1<-ddply(mmdat,.(resp,c1),.fun=ff)
+names(dat1)<-c('resp','individual','group','value','b')
+dat1$value<-dat1$value*100
+
+
+
+ff<-function(d){
+    return(data.frame(c2=unique(d$c2),
+             y=round(mean(d$ma.importance,na.rm=TRUE),digits=3),
+             b=round(mean(d$coefficients.ma.,na.rm=TRUE),digits=3)))
+}
+dat1<-ddply(mmdat,.(resp,lbl),.fun=ff)
+names(dat1)<-c('resp','individual','group','value','b')
+dat1$value<-dat1$value*100
+
+
+dt<-subset(dat1,resp=='her.ssbc')
+
+
+pfun<-function(dt){
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar=1
+to_add = data.frame( matrix(NA, empty_bar*nlevels(dt$group), ncol(dt)) )
+colnames(to_add) = colnames(dt)
+to_add$group=rep(levels(dt$group), each=empty_bar)
+dt=rbind(dt, to_add)
+dt=dt %>% arrange(group)
+dt$id=seq(1, nrow(dt))
+
+# Get the name and the y position of each label
+label_dt=dt
+number_of_bar=nrow(label_dt)
+angle= 90 - 360 * (label_dt$id-0.5) /number_of_bar     # I substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_dt$hjust<-ifelse( angle < -90, 1, 0)
+label_dt$angle<-ifelse(angle < -90, angle+180, angle)
+
+# prepare a data frame for base lines
+base_dt=dt %>%
+  group_by(group) %>%
+  summarize(start=min(id), end=max(id) - empty_bar) %>%
+  rowwise() %>%
+  mutate(title=mean(c(start, end)))
+
+# prepare a data frame for grid (scales)
+grid_dt = base_dt
+grid_dt$end = grid_dt$end[ c( nrow(grid_dt), 1:nrow(grid_dt)-1)] + 1
+grid_dt$start = grid_dt$start - 1
+grid_dt=grid_dt[-1,]
+
+# Make the plot
+return(ggplot(dt, aes(x=as.factor(id), y=value, fill=group)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+
+geom_bar(aes(x=as.factor(id), y=value, fill=group), stat="identity", alpha=0.5) +
+
+  # Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+geom_segment(data=grid_dt, aes(x = end, y = 80, xend = start, yend = 80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = 60, xend = start, yend = 60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = 40, xend = start, yend = 40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = 20, xend = start, yend = 20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+
+  # Add text showing the value of each 100/75/50/25 lines
+  annotate("text", x = rep(max(dt$id),4), y = c(20, 40, 60, 80), label = c("20", "40", "60", "80") , color="grey", size=3 , angle=0, fontface="bold", hjust=1) +
+
+geom_bar(aes(x=as.factor(id), y=value, fill=group), stat="identity", alpha=0.5) +
+  ylim(-100,120) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm")
+  ) +
+  coord_polar() +
+  geom_text(data=label_dt, aes(x=id, y=value+10, label=individual, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_dt$angle, inherit.aes = FALSE ) +
+
+# Add base line information
+geom_segment(data=base_dt, aes(x=start, y=-5, xend=end, yend=-5), colour = "black", alpha=0.8, size=0.6 , inherit.aes = FALSE ))
+#+
+#geom_text(data=base_dt, aes(x = title, y = -18, label=group), hjust=c(1,1,0,0), colour = "black", alpha=0.8, size=4, fontface="bold", inherit.aes = FALSE)
+}
+
+p1<-pfun(subset(dat1,is.na(group)==FALSE & resp=='her.ssbc',select=c('individual','group','value')))
+p2<-pfun(subset(dat1,is.na(group)==FALSE & resp=='her.state',select=c('individual','group','value')))
+p3<-pfun(subset(dat1,is.na(group)==FALSE & resp=='her.rec1',select=c('individual','group','value')))
+p4<-pfun(subset(dat1,is.na(group)==FALSE & resp=='herlrv.mn.bof',select=c('individual','group','value')))
+p5<-pfun(subset(dat1,is.na(group)==FALSE & resp=='herlrv.len',select=c('individual','group','value')))
+setwd(figsdir)
+pdf('circularbarplot_importance.pdf',height=12,width=10)
+grid.arrange(p1,p2,ncol=1)
+grid.arrange(p3,p4,ncol=1)
+grid.arrange(p4,p5,ncol=1)
+dev.off()
+
+
+
+
+
+
+
+
+
+
+ff<-function(d){
+    return(data.frame(c2=unique(d$c2),
+             y=round(mean(d$ma.importance,na.rm=TRUE),digits=3),
+             b=round(mean(d$coefficients.ma.,na.rm=TRUE),digits=3)))
+}
+dat1<-ddply(mmdat,.(resp,lbl),.fun=ff)
+names(dat1)<-c('resp','individual','group','imp','value')
+dat1$dr<-ifelse(dat1$value<0,'firebrick3','dodgerblue3')
+
+dt<-subset(dat1,resp=='her.ssbc')
+dt$value<-(dt$value/max(abs(dt$value)))*100
+
+
+pfun<-function(dt){
+dt$value<-(dt$value/max(abs(dt$value)))*100
+# Set a number of 'empty bar' to add at the end of each group
+empty_bar=1
+to_add = data.frame( matrix(NA, empty_bar*nlevels(dt$group), ncol(dt)) )
+colnames(to_add) = colnames(dt)
+to_add$group=rep(levels(dt$group), each=empty_bar)
+dt=rbind(dt, to_add)
+dt=dt %>% arrange(group)
+dt$id=seq(1, nrow(dt))
+
+# Get the name and the y position of each label
+label_dt=dt
+number_of_bar=nrow(label_dt)
+angle= 90 - 360 * (label_dt$id-0.5) /number_of_bar     # I substract 0.5 because the letter must have the angle of the center of the bars. Not extreme right(1) or extreme left (0)
+label_dt$hjust<-ifelse( angle < -90, 1, 0)
+label_dt$angle<-ifelse(angle < -90, angle+180, angle)
+
+# prepare a data frame for base lines
+base_dt=dt %>%
+  group_by(group) %>%
+  summarize(start=min(id), end=max(id) - empty_bar) %>%
+  rowwise() %>%
+  mutate(title=mean(c(start, end)))
+
+# prepare a data frame for grid (scales)
+grid_dt = base_dt
+grid_dt$end = grid_dt$end[ c( nrow(grid_dt), 1:nrow(grid_dt)-1)] + 1
+grid_dt$start = grid_dt$start - 1
+grid_dt=grid_dt[-1,]
+
+
+
+
+
+
+# Make the plot
+ggplot(dt, aes(x=value, y=as.factor(id),  fill=group)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+
+geom_point(aes(x=value, y=as.factor(id),  fill=as.factor(dr)), stat="identity", alpha=1) +
+scale_fill_manual(values=c('firebrick3','dodgerblue3'))+
+
+  # Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+#geom_segment(data=grid_dt, aes(x = end, y = -20, xend = start, yend = -20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+
+#geom_bar(aes(x=as.factor(id), y=value, fill=as.factor(dr)), stat="identity", alpha=1) +
+xlim(-100,100) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm")
+  ) +
+#  coord_polar() +
+  geom_text(data=label_dt, aes(x=value+10,y=id,, label=individual, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_dt$angle, inherit.aes = FALSE ) +
+
+# Add base line information
+geom_segment(data=base_dt, aes(x=start, y=-5, xend=end, yend=-5), colour = "black", alpha=0.8, size=0.6 , inherit.aes = FALSE ))
+
+
+
+
+
+# Make the plot
+return(ggplot(dt, aes(x=as.factor(id), y=value, fill=group)) +       # Note that id is a factor. If x is numeric, there is some space between the first bar
+
+geom_bar(aes(x=as.factor(id), y=value, fill=as.factor(dr)), stat="identity", alpha=1) +
+scale_fill_manual(values=c('firebrick3','dodgerblue3'))+
+
+  # Add a val=100/75/50/25 lines. I do it at the beginning to make sur barplots are OVER it.
+geom_segment(data=grid_dt, aes(x = end, y = 80, xend = start, yend = 80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = 60, xend = start, yend = 60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = 40, xend = start, yend = 40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = 20, xend = start, yend = 20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = -80, xend = start, yend = -80), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = -60, xend = start, yend = -60), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = -40, xend = start, yend = -40), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+geom_segment(data=grid_dt, aes(x = end, y = -20, xend = start, yend = -20), colour = "grey", alpha=1, size=0.3 , inherit.aes = FALSE ) +
+
+  # Add text showing the value of each 100/75/50/25 lines
+  annotate("text", x = rep(max(dt$id),4), y = c(20, 40, 60, 80), label = c("20", "40", "60", "80") , color="grey", size=3 , angle=0, fontface="bold", hjust=1) +
+
+geom_bar(aes(x=as.factor(id), y=value, fill=as.factor(dr)), stat="identity", alpha=1) +
+  ylim(-200,120) +
+  theme_minimal() +
+  theme(
+    legend.position = "none",
+    axis.text = element_blank(),
+    axis.title = element_blank(),
+    panel.grid = element_blank(),
+    plot.margin = unit(rep(-1,4), "cm")
+  ) +
+  coord_polar() +
+  geom_text(data=label_dt, aes(x=id, y=value+10, label=individual, hjust=hjust), color="black", fontface="bold",alpha=0.6, size=2.5, angle= label_dt$angle, inherit.aes = FALSE ) +
+
+# Add base line information
+geom_segment(data=base_dt, aes(x=start, y=-5, xend=end, yend=-5), colour = "black", alpha=0.8, size=0.6 , inherit.aes = FALSE ))
+#+
+#geom_text(data=base_dt, aes(x = title, y = -18, label=group), hjust=c(1,1,0,0), colour = "black", alpha=0.8, size=4, fontface="bold", inherit.aes = FALSE)
+}
+
+p1<-pfun(subset(dat1,is.na(group)==FALSE & resp=='her.ssbc'))
+p2<-pfun(subset(dat1,is.na(group)==FALSE & resp=='her.state'))
+p1<-pfun(subset(dat1,is.na(group)==FALSE & resp=='her.ssbc',select=c('individual','group','value')))
+
+
+
+
+################################################
+#  RADARCHART OF ALL PREDICTORS
+rfun0<-function(d){
+d<-subset(d,select=c('var','ma.importance'))
+d<-data.frame(var=sort(unique(d$var)),
+              imp=tapply(d$ma.importance,d$var,mean))
+d<-d[order(d$imp),]
+nms<-d$var
+
+d0<-spread(data=d,key=var, value=imp)
+d1<-data.frame(var=d$var,
+               imp=0.85)
+d1<-spread(data=d1,key=var, value=imp)
+d2<-data.frame(var=d$var,
+               imp=0)
+d2<-spread(data=d2,key=var, value=imp)
+dd<-rbind.fill(d1,d2,d0)
+dd<-subset(dd,select=nms)
+radarchart(dd,maxmin=TRUE,pfcol=alpha('dodgerblue',.5),pcol='dodgerblue',title=rsp,vlcex=.9,axislabcol='red')
+}
+z<-rfun0(mmdat)
+
+
+
+rfun0<-function(d){
+d<-subset(d,select=c('var','ma.importance'))
+d<-data.frame(var=sort(unique(d$var)),
+              imp=tapply(d$ma.importance,d$var,mean))
+d<-d[order(d$imp),]
+nms<-d$var
+
+d0<-spread(data=d,key=var, value=imp)
+d1<-data.frame(var=d$var,
+               imp=1)
+d1<-spread(data=d1,key=var, value=imp)
+d2<-data.frame(var=d$var,
+               imp=0)
+d2<-spread(data=d2,key=var, value=imp)
+dd<-rbind.fill(d1,d2,d0)
+dd<-subset(dd,select=nms)
+radarchart(dd,maxmin=TRUE,pfcol=alpha('dodgerblue',.5),pcol='dodgerblue',title=rsp,vlcex=.9,axislabcol='red')
+}
+par(mfrow=c(2,3))
+z<-ddply(mmdat,.(resp),.fun=rfun0)
+
+
+
+
+pdat<-data.frame(var=sort(unique(mmdat$var)),
+                 imp=tapply(mmdat$ma.importance,mmdat$var,mean))
+pdat<-pdat[order(pdat$imp),]
+
+d<-subset(mmdat,resp=='her.ssbc')
+
+f<-function(d){
+d<-subset(d,var!='her.len.rv')
+nms<-unique(d$var)
+nms<-nms[grepl('sst\\.',nms)==TRUE | grepl('temp\\.',nms)==TRUE]
+nms<-nms[grepl('\\.ct',nms)==FALSE &
+         grepl('sst\\.sha',nms)==FALSE &
+         grepl('\\.fsd',nms)==FALSE &
+         grepl('\\.tmax',nms)==FALSE &
+         grepl('\\.amp',nms)==FALSE &
+         grepl('dur12',nms)==FALSE]
+d1<-subset(d,var %in% nms)
+o1<-data.frame(grp='Temperature',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('\\.ct',nms)==TRUE |
+         grepl('\\.dur12',nms)==TRUE |
+         grepl('\\.fsd',nms)==TRUE |
+         grepl('\\.tmax',nms)==TRUE|
+         grepl('\\.amp',nms)==TRUE]
+d1<-subset(d,var %in% nms)
+o2<-data.frame(grp='Phenology',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('chl\\.',nms)==TRUE |
+         grepl('ph\\.',nms)==TRUE |
+         grepl('phyt\\.',nms)==TRUE]
+nms<-nms[grepl('\\.ct',nms)==FALSE]
+d1<-subset(d,var %in% nms)
+o3<-data.frame(grp='Phytoplankton',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('had\\.pi',nms)==TRUE]
+d1<-subset(d,var %in% nms)
+o4<-data.frame(grp='Predation',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('jf',nms)==TRUE]
+d1<-subset(d,var %in% nms)
+o5<-data.frame(grp='Competition',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('land',nms)==TRUE | grepl('expr',nms)==TRUE| grepl('bfish',nms)==TRUE]
+d1<-subset(d,var %in% nms)
+o6<-data.frame(grp='Exploitation',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+
+nms<-unique(d$var)
+nms<-nms[grepl('asl',nms)==TRUE | grepl('wind',nms)==TRUE| grepl('wnd',nms)==TRUE]
+nms<-nms[grepl('\\.ct',nms)==FALSE &
+         grepl('\\.tmax',nms)==FALSE]
+d1<-subset(d,var %in% nms)
+o7<-data.frame(grp='Currents',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('zp\\.',nms)==TRUE |
+         grepl('lrv\\.rich',nms)==TRUE|
+         grepl('lrv\\.mn',nms)==TRUE|
+         grepl('preytot',nms)==TRUE|
+         grepl('lrv\\.pe',nms)==TRUE]
+nms<-nms[grepl('\\.ct',nms)==FALSE]
+d1<-subset(d,var %in% nms)
+o8<-data.frame(grp='Zooplankton',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('strt',nms)==TRUE |
+         grepl('sil',nms)==TRUE|
+         grepl('phos',nms)==TRUE|
+         grepl('nit',nms)==TRUE|
+         grepl('ph\\.mn',nms)==TRUE|
+         grepl('nut\\.',nms)==TRUE|
+         grepl('phyt\\.mn',nms)==TRUE]
+nms<-nms[grepl('\\.ct',nms)==FALSE]
+d1<-subset(d,var %in% nms)
+o9<-data.frame(grp='Mixing/production',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+nms<-unique(d$var)
+nms<-nms[grepl('nao',nms)==TRUE |
+         grepl('\\.dist',nms)==TRUE]
+nms<-nms[grepl('\\.ct',nms)==FALSE]
+d1<-subset(d,var %in% nms)
+o10<-data.frame(grp='Climate',
+               imp=mean(d1$ma.importance),
+               b=mean(d1$coefficients.ma.))
+
+dout<-rbind(o1,o2,o3,o4,o5,o6,o7,o8,o9,o10)
+return(dout)
+}
+idat<-ddply(mmdat,.(resp),.fun=f)
+idata<-f(mmdat)
+
+
+d<-subset(idat,resp=='her.ssbc')
+
+rfun<-function(d){
+rsp<-unique(d$resp)
+d0<-spread(data=d,key=grp, value=imp)
+d1<-data.frame(grp=d$grp,
+               imp=1)
+d1<-spread(data=d1,key=grp, value=imp)
+d2<-data.frame(grp=d$grp,
+               imp=0)
+d2<-spread(data=d2,key=grp, value=imp)
+dd<-rbind.fill(d1,d2,d0)
+dd<-subset(dd,select=c('Temperature','Mixing/production','Climate','Currents','Phenology','Predation','Competition','Zooplankton','Phytoplankton','Exploitation'))
+radarchart(dd,maxmin=TRUE,pfcol=alpha('dodgerblue',.5),pcol='dodgerblue',title=rsp)
+}
+par(mfrow=c(2,3))
+z<-dlply(subset(idat,select=c('grp','imp','resp')),.(resp),.fun=rfun)
+
+
+
+dout00<-pbreplicate(2,impsim(),simplify=FALSE)
+n<-12
+d<-d[sample(nrow(d),n,replace=FALSE),]
+
+ma2<-model.avg(dd2,subset=delta<4)#MODEL AVERAGED RESULTS WITH DELTA AICC<4; 95% CONFIDENCE SET
+stopCluster(clust)
+
