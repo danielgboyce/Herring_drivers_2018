@@ -1,10 +1,35 @@
+#library(lattice)
 library(tidyr)
 library(lavaan)
+library(akima)
+library(corrplot)
+library(stringr)
+library(RColorBrewer)
+library(segmented)
+library(splines)
+library(strucchange)
+library(data.table)
+#library(psych)
+#library(reshape2)
+library(gplots)
+library(forecast)
+#library(cluster)
+library(vegan)
+library(ggplot2)
+#library(hybridHclust)
+library(raster)
+library(fields)
+library(gridExtra)
+library(colorRamps)
+#library(mapdata)
 library(scales)
 library(MASS)
+library(mgcv)
+#library(maps)
 library(plyr)
 library(plotrix)
 library(lubridate)
+#library(fossil)
 library(bnstruct)
 library(rcompanion)
 library(moments)
@@ -56,10 +81,8 @@ dm2<-subset(dm,pmis<=35)
 omt<-c('had.dep.rv','wind.fsd','had.totwgt.rv','had.totno.rv','had.len.rv','her.dvm2.rv','herlrv.dep.bof')
 setwd(datadir)
 #load("impdatav.std.RData")
-#data<-impdatav.std
 load("impdatav.RData")
 data<-impdatav
-nms<-names(data)
 nms<-nms[grepl('\\.se',nms)==FALSE &
          grepl('\\.her',nms)==FALSE &
          grepl('\\.tplus',nms)==FALSE &
@@ -90,7 +113,7 @@ df<-slide(df,Var=nm,slideBy=5,NewVar=gsub(' ','',paste(nm,'.t5')))
 mat<-subset(df,year>=1975 & year<=2005)
 
 f<-function(x){transformTukey(x,plotit=FALSE)}
-mat2<-data.frame(cbind(subset(mat,select='year'),apply(mat[,2:dim(mat)[2]],2,f)))
+#mat<-data.frame(cbind(subset(mat,select='year'),apply(mat[,2:dim(mat)[2]],2,f)))
 
 
 #CONVERT TO SHORT FORM, EXAMINE NORMALITY, TRANSFORM USING BEST EXPONENTIAL TRANSFORM
@@ -148,16 +171,9 @@ a<-subset(mat,select=c('her.ssbc.t4','herlrv.len','herlrv.len.t1','herlrv.len.t2
 round(cor(a,use='pairwise.complete.obs',method='spearman'),digits=2)
 
 
-a<-subset(mat,select=c('her.ssbc.t4','had.pi','her.expr.t3','herlrv.len','sst.stalt.t4','sst.sha.t4','herlrv.surv','herlrv.mn.bof','her.rec1','her.rec1.t1','her.rec1.t2','her.rec1.t3'))
-#a<-subset(mat,select=c('herlrv.len.t1','had.pi.t1','herlrv.mn.bof.t1','gs.dist.t1','nao.t1','wind.amp.t1','sst.amp.t1','sst.lur.t1'))
-md<-stepAIC(lm(her.ssbc.t4 ~.,data=a))
-
-md1<-lm(her.ssbc.t4 ~ her.expr.t3+ herlrv.len + herlrv.mn.bof + sst.stalt.t4 + had.pi + herlrv.surv,data=a)
-#md2<-lm(her.ssbc.t4 ~ her.expr.t3+ herlrv.len + herlrv.mn.bof + sst.stalt.t4 + had.pi + herlrv.surv + her.rec1.t1,data=a)
-md3<-lm(her.ssbc.t4 ~ her.expr.t3+ herlrv.len + herlrv.mn.bof + sst.stalt.t4 + had.pi + herlrv.surv + her.rec1.t2,data=a)
-md4<-lm(her.ssbc.t4 ~ her.expr.t3+ herlrv.len + herlrv.mn.bof + sst.stalt.t4 + had.pi + herlrv.surv + her.rec1.t3,data=a)
-AIC(md1,md2,md3,md4)
-
+a<-subset(mat,select=c('her.ssbc.t4','had.pi','her.expr.t3','herlrv.len','sst.stalt.t4','sst.sha.t4','herlrv.surv','herlrv.mn.bof'))
+a<-subset(mat,select=c('herlrv.len.t1','had.pi.t1','herlrv.mn.bof.t1','gs.dist.t1','nao.t1','wind.amp.t1','sst.amp.t1','sst.lur.t1'))
+md<-stepAIC(lm(herlrv.len.t1 ~.,data=a))
 md<-stepAIC(lm(herlrv.len.t1 ~.*.,data=a))
 md<-stepAIC(lm(her.ssbc.t4 ~ had.pi + her.expr.t3 + sst.amp + t50.ct.t4 + herlrv.len + sst.stalt.t4 + sst.sha.t4 + herlrv.surv + herlrv.mn.bof,data=mat))
 md<-lm(her.ssbc.t4 ~ had.pi + her.expr.t3 + sst.amp + t50.ct.t4 + herlrv.len + herlrv.mn.bof + sst.stalt.t4+sst.sha.t4+herlrv.surv,data=mat)
@@ -165,9 +181,7 @@ summary(md)
 summary(md2)
 AIC(md,md2)
 
-library(Hmisc)
 rmat<-cor(mat)
-rmat2<-cor(mat2)
 
 #PREYTOT IS HIGHLY CORRELATED WITH LARVAL SERIES - MAY BE DUE TO COMMON FACTOR DRIVIGN ALL LARVAE
 mod<-'
@@ -182,27 +196,14 @@ herlrv.surv.t1 ~ had.pi + herlrv.mn.bof + herlrv.len + sst.amp + sst.fsd + t50.c
 #ESTIMATE VARIANCES OF SINGLE OBSERVED MODELS
 #herlrv.len ~~ had.pi
 '
-smod<-sem(mod,sample.cov=rmat,sample.nobs=dim(mat)[1],std.lv=FALSE,warn=FALSE)
-smod2<-sem(mod,sample.cov=rmat2,sample.nobs=dim(mat2)[1],std.lv=FALSE,warn=FALSE)
 
+smod<-sem(mod,sample.cov=rmat,sample.nobs=dim(mat)[1],std.lv=FALSE,warn=FALSE)
+
+#smod2<-sem(mod2,sample.cov=rmat,sample.nobs=dim(mat)[1],std.lv=FALSE,warn=FALSE)
 pe<-parameterEstimates(smod)
 ge<-as.matrix(smod,matrix.type='edgelist')
 
 summary(smod,standardized=TRUE,fit=TRUE,rsquare=TRUE)
-                 Estimate
-    her.ssbc.t5       0.937
-    her.rec1.t3       0.226
-    herlrv.len.t1     0.440
-    hrlrv.mn.bf.t1    0.655
-    herlrv.surv.t1    0.724
-
-summary(smod2,standardized=TRUE,fit=TRUE,rsquare=TRUE)
-                   Estimate
-    her.ssbc.t5       0.931
-    her.rec1.t3       0.211
-    herlrv.len.t1     0.419
-    hrlrv.mn.bf.t1    0.053
-    herlrv.surv.t1    0.655
 AIC(smod,smod2)
 
 #fit simple reg
@@ -224,10 +225,13 @@ plot.igraph(ga,edge.label = round(betas,digits=2))
 
 
 
+
+
+
 ##############################################
 
 #SETS COLOURS FOR GROUPS
-fit.params = smod %>% parameterestimates()
+#grps<-list(Herring=c('her.ssbc.t5','her.rec1.t3','herlrv.len.t1','herlrv.mn.bof.t1','herlrv.surv.t1','herlrv.mn.bof','her.ssbc.t1','her.ssbc'),Predation=c('had.pi','had.pi.t1'),Exploitation=c('her.expr.t4'),Environment=c('sst.amp.t1','t50.ct.t5','sst.stalt.t5','sst.sha.t5','gs.dist.t1','wind.amp.t1','sst.lur.t1','sst.amp','sst.fsd','t50.ct','sst.stalt','gs.dist'))
 grps<-list(Resp=c('her.ssbc.t5','her.rec1.t3','herlrv.len.t1','herlrv.mn.bof.t1','herlrv.surv.t1'),Herring=c('herlrv.mn.bof','herlrv.len','her.ssbc.t1','her.ssbc'),Predation=c('had.pi','had.pi.t1'),Exploitation=c('her.expr.t4'),Environment=c('sst.amp.t1','t50.ct.t5','sst.stalt.t5','sst.sha.t5','gs.dist.t1','wind.amp.t1','sst.lur.t1','sst.amp','sst.fsd','t50.ct','sst.stalt','gs.dist'))
 
 #GETS EDGE LABELS
@@ -239,11 +243,11 @@ fit.params$lab<-gsub(' ','',paste(round(fit.params$est,digits=2),fit.params$sig)
 
 #WIDTH 0F EDGES
 #fit.params$esz<-abs(log10(abs(fit.params$est)))*30
+library(plotrix)
 fit.params$esz<-rescale(log10(abs(fit.params$est)),newrange=c(.2,10))
 
 #COLOURS FOR GROUPS
-cls<-c(Resp='white',Herring='gray90',Predation='mediumpurple2',Exploitation='hotpink',Environment='skyblue')
-#cls<-c(Resp='gray10',Herring='gray50',Predation='mediumpurple4',Exploitation='maroon4',Environment='dodgerblue4')
+cls<-c(Resp='white',Herring='gray90',Predation='mediumpurple2',Exploitation='hotpink',Environment='lightblue1')
 
 #NODE NAMES
 nms<-data.frame(nms1=smod@Data@ov.names[[1]])
@@ -254,11 +258,11 @@ nms$var<-gsub('\\.t3','',nms$var)
 nms$var<-gsub('\\.t4','',nms$var)
 nms$var<-gsub('\\.t5','',nms$var)
 
-nms$lag<-ifelse(grepl('\\.t1',nms$nms1)==TRUE,'\n(t+1)','nolag')
-nms$lag<-ifelse(grepl('\\.t2',nms$nms1)==TRUE,'\n(t+2)',nms$lag)
-nms$lag<-ifelse(grepl('\\.t3',nms$nms1)==TRUE,'\n(t+3)',nms$lag)
-nms$lag<-ifelse(grepl('\\.t4',nms$nms1)==TRUE,'\n(t+4)',nms$lag)
-nms$lag<-ifelse(grepl('\\.t5',nms$nms1)==TRUE,'\n(t+5)',nms$lag)
+nms$lag<-ifelse(grepl('\\.t1',nms$nms1)==TRUE,'(t+1)','nolag')
+nms$lag<-ifelse(grepl('\\.t2',nms$nms1)==TRUE,'(t+2)',nms$lag)
+nms$lag<-ifelse(grepl('\\.t3',nms$nms1)==TRUE,'(t+3)',nms$lag)
+nms$lag<-ifelse(grepl('\\.t4',nms$nms1)==TRUE,'(t+4)',nms$lag)
+nms$lag<-ifelse(grepl('\\.t5',nms$nms1)==TRUE,'(t+5)',nms$lag)
 
 setwd(figsdir)
 dm<-read.csv('dm.csv',header=TRUE)
@@ -268,11 +272,9 @@ nms<-nms[order(nms$id),]
 
 nms$nodenms<-gsub('nolag','',paste(nms$lbl,nms$lag))
 nms$nodenms<-gsub('Her ','',paste(nms$nodenms))
-nms$nodenms<-capitalize(nms$nodenms)
 
-nms$bw<-ifelse(nms$nms1 %in% c('her.ssbc.t5','her.rec1.t3','herlrv.len.t1','herlrv.mn.bof.t1','herlrv.surv.t1'),5,.5)#WIDTH OF NODE OUTLINES
-nms$bcl<-ifelse(nms$nms1 %in% c('her.ssbc.t5','her.rec1.t3','herlrv.len.t1','herlrv.mn.bof.t1','herlrv.surv.t1'),'red3','gray20')#COLOR OF NODE OUTLINES
-nms$bsz<-ifelse(nms$nms1 %in% c('her.ssbc.t5','her.rec1.t3','herlrv.len.t1','herlrv.mn.bof.t1','herlrv.surv.t1'),1.45,1.1)#SIZE OF NODES
+nms$bw<-ifelse(nms$nms1 %in% c('her.ssbc.t5','her.rec1.t3','herlrv.len.t1','herlrv.mn.bof.t1','herlrv.surv.t1'),5,.5)
+nms$bcl<-ifelse(nms$nms1 %in% c('her.ssbc.t5','her.rec1.t3','herlrv.len.t1','herlrv.mn.bof.t1','herlrv.surv.t1'),'darkred','gray20')
 
 #SUBSET ONLY DIRECTED EFFECTS (NOT VARIANCES/COVARIANCES)
 fp<-subset(fit.params,op=='~')
@@ -280,10 +282,8 @@ fp<-subset(fit.params,op=='~')
 setwd(figsdir)
 pdf('SEM_untransf.pdf',height=8,width=8)
 par(oma=c(0,0,0,0),mar=c(0,0,0,0))
-semPaths(smod,curvePivot=TRUE,intercepts=FALSE,sizeMan=8,layout='spring',style='OpenMx',what='std',rotation=2,nCharNodes=0,nCharEdges=0,shapeMan='ellipse',reorder=TRUE,pastel=FALSE,edge.label.cex=.5,cardinal=TRUE,equalizeManifests=TRUE,intAtSide=TRUE,exoCov=FALSE,exoVar=FALSE,curve=TRUE,curveAdjacent='->',borders=TRUE,border.color=nms$bcl,border.width=nms$bw,fade=TRUE,asize=2,curvePivotShape=.8,groups=grps,posCol=c("forestgreen","firebrick3"),legend=FALSE,edgeLabels=fp$lab,rainbowStart=1,esize=fp$esz,edge.label.bg=FALSE,edge.label.position=.5,vTrans=255,color=cls,nodeLabels=nms$nodenms,mar=c(1.5,1.5,1.5,1.5),node.width=nms$bsz,node.height=nms$bsz,label.color='black',label.cex=.55,label.scale=FALSE,edge.label.color='gray30')
+semPaths(smod,curvePivot=TRUE,intercepts=FALSE,sizeMan=8,layout='spring',style='lisrel',what='std',rotation=4,nCharNodes=0,nCharEdges=0,shapeMan='ellipse',reorder=TRUE,pastel=FALSE,edge.label.cex=.5,cardinal=TRUE,equalizeManifests=FALSE,intAtSide=TRUE,exoCov=FALSE,exoVar=FALSE,curve=TRUE,curveAdjacent='->',borders=TRUE,border.color=nms$bcl,border.width=nms$bw,fade=FALSE,asize=1.75,curvePivotShape=.8,groups=grps,posCol=c("forestgreen","firebrick3"),legend=FALSE,edgeLabels=fp$lab,rainbowStart=1,esize=fp$esz,edge.label.bg=FALSE,edge.label.position=.5,vTrans=255,color=cls,nodeLabels=nms$nodenms,mar=c(1,1,1,1))
 dev.off()
-
-
 
 semPaths(smod,curvePivot=TRUE,intercepts=FALSE,sizeMan=8,layout='spring',style='lisrel',what='std',rotation=4,nCharNodes=0,nCharEdges=0,shapeMan='ellipse',reorder=TRUE,pastel=FALSE,edge.label.cex=.5,cardinal=TRUE,equalizeManifests=FALSE,intAtSide=TRUE,exoCov=FALSE,exoVar=FALSE,curve=TRUE,curveAdjacent='->',borders=TRUE,mar=c(1,1,1,1),fade=FALSE)
 
